@@ -11,8 +11,8 @@ import (
 	"sync"
 
 	"github.com/mdp/qrterminal/v3"
-	waProto "go.mau.fi/whatsmeow/binary/proto"
 	"go.mau.fi/whatsmeow"
+	waProto "go.mau.fi/whatsmeow/binary/proto"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
@@ -25,6 +25,13 @@ import (
 type SendRequest struct {
 	JID     string `json:"jid"`
 	Message string `json:"message"`
+}
+
+type MediaSendRequest struct {
+	JID       string `json:"jid"`
+	FilePath  string `json:"file_path"`
+	MediaType string `json:"media_type"`
+	Caption   string `json:"caption,omitempty"`
 }
 
 type ReceivedMessage struct {
@@ -40,13 +47,11 @@ var (
 )
 
 func main() {
-	// Parse the --debug flag
 	flag.BoolVar(&debugMode, "debug", false, "Enable debug output")
 	flag.Parse()
 
 	fmt.Println("✅ Code started...")
 
-	// Use loggers only if debug mode is enabled
 	var dbLog, clientLog waLog.Logger
 	if debugMode {
 		dbLog = waLog.Stdout("DB", "INFO", true)
@@ -65,17 +70,14 @@ func main() {
 
 	client = whatsmeow.NewClient(deviceStore, clientLog)
 
-	// Message event handler
 	client.AddEventHandler(func(evt interface{}) {
 		switch v := evt.(type) {
 		case *events.Message:
-			// Ignore messages from ourselves
 			if v.Info.MessageSource.IsFromMe {
 				return
 			}
 
 			var text string
-
 			switch {
 			case v.Message.GetConversation() != "":
 				text = v.Message.GetConversation()
@@ -108,7 +110,6 @@ func main() {
 		}
 	})
 
-	// QR code login if not connected
 	if client.Store.ID == nil {
 		qrChan, _ := client.GetQRChannel(context.Background())
 		go func() {
@@ -121,7 +122,6 @@ func main() {
 				}
 			}
 		}()
-
 		err = client.Connect()
 		if err != nil {
 			panic(err)
@@ -134,9 +134,9 @@ func main() {
 		fmt.Println("✅ Reconnected using saved session.")
 	}
 
-	// Set up HTTP server
 	http.HandleFunc("/send", sendHandler)
 	http.HandleFunc("/messages", messagesHandler)
+	http.HandleFunc("/sendMedia", sendMediaHandler)
 
 	go func() {
 		fmt.Println("🌐 Server started on http://localhost:8080")
@@ -145,7 +145,6 @@ func main() {
 		}
 	}()
 
-	// Wait for Ctrl+C
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt)
 	<-stop
@@ -189,4 +188,115 @@ func messagesHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	receivedMessages = []ReceivedMessage{}
+}
+
+func sendMediaHandler(w http.ResponseWriter, r *http.Request) {
+	var req MediaSendRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	fileData, err := os.ReadFile(req.FilePath)
+	if err != nil {
+		http.Error(w, "Failed to read media file", http.StatusInternalServerError)
+		return
+	}
+
+	// Upload media to WhatsApp
+	uploadedMedia, err := client.Upload(context.Background(), fileData, whatsmeow.MediaImage)
+	if err != nil {
+		http.Error(w, "Failed to upload media", http.StatusInternalServerError)
+		if debugMode {
+			fmt.Printf("❌ Media upload failed: %v\n", err)
+		}
+		return
+	}
+
+	jid := types.NewJID(req.JID, "s.whatsapp.net")
+	var msg *waProto.Message
+
+	// Prepare the message depending on the media type
+	switch req.MediaType {
+	case "photo":
+		msg = &waProto.Message{
+			ImageMessage: &waProto.ImageMessage{
+				Caption:       proto.String(req.Caption),
+				Mimetype:      proto.String("image/png"),
+				URL:           proto.String(uploadedMedia.URL),
+				DirectPath:    proto.String(uploadedMedia.DirectPath),
+				MediaKey:      uploadedMedia.MediaKey,
+				FileEncSHA256: uploadedMedia.FileEncSHA256,
+				FileSHA256:    uploadedMedia.FileSHA256,
+				FileLength:    proto.Uint64(uploadedMedia.FileLength),
+			},
+		}
+	case "video":
+		msg = &waProto.Message{
+			VideoMessage: &waProto.VideoMessage{
+				Caption:       proto.String(req.Caption),
+				Mimetype:      proto.String("video/mp4"),
+				URL:           proto.String(uploadedMedia.URL),
+				DirectPath:    proto.String(uploadedMedia.DirectPath),
+				MediaKey:      uploadedMedia.MediaKey,
+				FileEncSHA256: uploadedMedia.FileEncSHA256,
+				FileSHA256:    uploadedMedia.FileSHA256,
+				FileLength:    proto.Uint64(uploadedMedia.FileLength),
+			},
+		}
+	case "document":
+		msg = &waProto.Message{
+			DocumentMessage: &waProto.DocumentMessage{
+				Title:         proto.String(req.Caption),
+				Mimetype:      proto.String("application/pdf"),
+				URL:           proto.String(uploadedMedia.URL),
+				DirectPath:    proto.String(uploadedMedia.DirectPath),
+				MediaKey:      uploadedMedia.MediaKey,
+				FileEncSHA256: uploadedMedia.FileEncSHA256,
+				FileSHA256:    uploadedMedia.FileSHA256,
+				FileLength:    proto.Uint64(uploadedMedia.FileLength),
+			},
+		}
+	case "audio":
+		msg = &waProto.Message{
+			AudioMessage: &waProto.AudioMessage{
+				Mimetype:      proto.String("audio/opus"),
+				URL:           proto.String(uploadedMedia.URL),
+				DirectPath:    proto.String(uploadedMedia.DirectPath),
+				MediaKey:      uploadedMedia.MediaKey,
+				FileEncSHA256: uploadedMedia.FileEncSHA256,
+				FileSHA256:    uploadedMedia.FileSHA256,
+				FileLength:    proto.Uint64(uploadedMedia.FileLength),
+			},
+		}
+	case "sticker":
+		msg = &waProto.Message{
+			StickerMessage: &waProto.StickerMessage{
+				Mimetype: 	proto.String("image/webp"),
+				URL:           proto.String(uploadedMedia.URL),
+				DirectPath:    proto.String(uploadedMedia.DirectPath),
+				MediaKey:      uploadedMedia.MediaKey,
+				FileEncSHA256: uploadedMedia.FileEncSHA256,
+				FileSHA256:    uploadedMedia.FileSHA256,
+				FileLength:    proto.Uint64(uploadedMedia.FileLength),
+			},
+		}
+	// Handle other media types (video, document, etc.) if needed
+	default:
+		http.Error(w, "Unsupported media type", http.StatusBadRequest)
+		return
+	}
+
+	// Send the media message
+	_, err = client.SendMessage(context.Background(), jid, msg)
+	if err != nil {
+		http.Error(w, "Failed to send media", http.StatusInternalServerError)
+		return
+	}
+
+	if debugMode {
+		fmt.Printf("✅ Sent %s to %s: %s\n", req.MediaType, req.JID, req.FilePath)
+	}
+
+	w.Write([]byte("✅ Media sent"))
 }

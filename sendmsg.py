@@ -23,7 +23,7 @@ if __name__ == "__main__":
     async def main():
         async with aiohttp.ClientSession() as session:
             msg = "Hello, this is a test message!"
-            phone_no = ""  # Replace with the actual phone number
+            phone_no = "918101858360"  # Replace with the actual phone number
             await send_message(session, msg, phone_no)
 
     asyncio.run(main())
