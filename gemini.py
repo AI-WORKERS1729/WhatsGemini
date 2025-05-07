@@ -97,7 +97,7 @@ if __name__ == "__main__":
         prompt = "Create a beautiful sunset over the ocean."
         response = await generate_reply(prompt)
         async with aiohttp.ClientSession() as session:
-            phone_no = "918101858360"
+            phone_no = ""
             if response:
                 await send_message(session, response, phone_no)
                 # print("Text Response:", response)
