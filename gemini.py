@@ -12,6 +12,17 @@ load_dotenv()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 async def generate_reply(prompt_text, image_path='generated_images/gemini_image.png',phone_no=""):
+    
+    if prompt_text.startswith("generate a sticker"):
+        # If the prompt is to generate a sticker, set the image path accordingly
+        image_path = 'generated_images/gemini_sticker.webp'
+        type = "sticker"
+    else:
+        # Otherwise, set the image path for normal image generation
+        image_path = 'generated_images/gemini_image.png'
+        type = "photo"
+        
+        
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp-image-generation:generateContent?key={GEMINI_API_KEY}"
 
     headers = {
@@ -49,9 +60,9 @@ async def generate_reply(prompt_text, image_path='generated_images/gemini_image.
                         with open(image_path, "wb") as img_file:
                             img_file.write(base64.b64decode(image_data))
                         if text_response:
-                            await send_media(session, "generated_images/gemini_image.png", phone_no, "photo", text_response)
+                            await send_media(session, image_path, phone_no, type, text_response)
                         else:
-                            await send_media(session, "generated_images/gemini_image.png", phone_no, "photo", "Check this out!")
+                            await send_media(session, image_path, phone_no, type, "Check this out!")
                             # print("Image generated and saved.")
                     elif text_response:
                         await send_message(session, text_response, phone_no)

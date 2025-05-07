@@ -93,6 +93,10 @@ func main() {
 				text = "[Buttons message]"
 			case v.Message.GetListMessage() != nil:
 				text = "[List message]"
+			case v.Message.GetAudioMessage() != nil:
+				text = "[Audio message]"
+			case v.Message.GetStickerMessage() != nil:
+				text = "[Sticker message]"
 			default:
 				text = "[Unsupported or empty message type]"
 			}

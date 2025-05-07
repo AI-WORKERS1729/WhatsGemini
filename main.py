@@ -15,7 +15,10 @@ async def message_worker():
             if fetched_message:
                 print(fetched_message)
                 input_text = fetched_message["message"]
-                await generate_reply(f"{default_prompt} {input_text}",phone_no=fetched_message["from"])
+                if "[Sticker message]"==input_text:
+                    await generate_reply(f"only generate a sticker don't generate any metadata or any text",phone_no=fetched_message["from"])
+                else:
+                    await generate_reply(f"{default_prompt} {input_text}",phone_no=fetched_message["from"])
                 # await send_message(session, output_text, fetched_message["from"])
             else:
                 await asyncio.sleep(2.5)  # Sleep if no new messages
